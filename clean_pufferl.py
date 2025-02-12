@@ -32,7 +32,7 @@ def create(config, vecenv, policy, optimizer=None, wandb=None):
     profile = Profile()
     losses = make_losses()
 
-    utilization = Utilization()
+    utilization = Utilization(config.device)
     msg = f'Model Size: {abbreviate(count_params(policy))} parameters'
     print_dashboard(config.env, utilization, 0, 0, profile, losses, {}, msg, clear=True)
 
@@ -108,8 +108,8 @@ def evaluate(data):
             else:
                 actions, logprob, _, value = policy(o_device)
 
-            if config.device == 'cuda':
-                torch.cuda.synchronize()
+            if 'cuda' in config.device:
+                torch.cuda.synchronize(config.device)
 
         with profile.eval_misc:
             value = value.flatten()
@@ -188,8 +188,8 @@ def train(data):
                         action=atn,
                     )
 
-                if config.device == 'cuda':
-                    torch.cuda.synchronize()
+                if 'cuda' in config.device:
+                    torch.cuda.synchronize(config.device)
 
             with profile.train_misc:
                 logratio = newlogprob - log_probs.reshape(-1)
@@ -235,8 +235,8 @@ def train(data):
                 loss.backward()
                 torch.nn.utils.clip_grad_norm_(data.policy.parameters(), config.max_grad_norm)
                 data.optimizer.step()
-                if config.device == 'cuda':
-                    torch.cuda.synchronize()
+                if 'cuda' in config.device:
+                    torch.cuda.synchronize(config.device)
 
             with profile.train_misc:
                 losses.policy_loss += pg_loss.item() / total_minibatches
@@ -490,12 +490,13 @@ class Experience:
         self.b_returns = self.b_advantages + self.b_values
 
 class Utilization(Thread):
-    def __init__(self, delay=1, maxlen=20):
+    def __init__(self, device, delay=1, maxlen=20):
         super().__init__()
         self.cpu_mem = deque(maxlen=maxlen)
         self.cpu_util = deque(maxlen=maxlen)
         self.gpu_util = deque(maxlen=maxlen)
         self.gpu_mem = deque(maxlen=maxlen)
+        self.device = device
 
         self.delay = delay
         self.stopped = False
@@ -507,7 +508,7 @@ class Utilization(Thread):
             mem = psutil.virtual_memory()
             self.cpu_mem.append(100*mem.active/mem.total)
             if torch.cuda.is_available():
-                self.gpu_util.append(torch.cuda.utilization())
+                self.gpu_util.append(torch.cuda.utilization(self.device))
                 free, total = torch.cuda.mem_get_info()
                 self.gpu_mem.append(100*free/total)
             else:
