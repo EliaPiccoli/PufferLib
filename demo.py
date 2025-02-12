@@ -194,6 +194,10 @@ def sweep_carbs(args, env_name, make_env, policy_cls, rnn_cls):
             search_center=16, is_integer=True),
     ]
 
+    emb_sz_param = sweep_parameters['policy']['parameters']['emb_size']
+    param_spaces.append(carbs_param('policy', 'emb_size', 'log', sweep_parameters,
+        search_center=256, is_integer=True))
+
     carbs_params = CARBSParams(
         better_direction_sign=1,
         is_wandb_logging_enabled=False,
@@ -230,6 +234,7 @@ def sweep_carbs(args, env_name, make_env, policy_cls, rnn_cls):
         #wandb.config.policy['hidden_size'] = hidden_size
         train_suggestion = {k.split('/')[1]: v for k, v in suggestion.items() if k.startswith('train/')}
         env_suggestion = {k.split('/')[1]: v for k, v in suggestion.items() if k.startswith('env/')}
+        policy_suggestion = {k.split('/')[1]: v for k, v in suggestion.items() if k.startswith('policy/')}
         args['train'].update(train_suggestion)
         args['train']['batch_size'] = closest_power(
             train_suggestion['batch_size'])
@@ -237,11 +242,16 @@ def sweep_carbs(args, env_name, make_env, policy_cls, rnn_cls):
             train_suggestion['minibatch_size'])
         args['train']['bptt_horizon'] = closest_power(
             train_suggestion['bptt_horizon'])
-
+        args['policy']['emb_size'] = closest_power(
+            policy_suggestion['emb_size'])
+        args['rnn']['input_size'] = args['policy']['emb_size']
+        args['rnn']['hidden_size'] = args['policy']['emb_size']
         args['env'].update(env_suggestion)
         args['track'] = True
         wandb.config.update({'train': args['train']}, allow_val_change=True)
         wandb.config.update({'env': args['env']}, allow_val_change=True)
+        wandb.config.update({'policy': args['policy']}, allow_val_change=True)
+        wandb.config.update({'rnn': args['rnn']}, allow_val_change=True)
 
         #args.env.__dict__['vision'] = vision
         #args['policy']['cnn_channels'] = cnn_channels
@@ -271,7 +281,7 @@ def sweep_carbs(args, env_name, make_env, policy_cls, rnn_cls):
                 )
             )
 
-    wandb.agent(sweep_id, main, count=500)
+    wandb.agent(sweep_id, main, count=50)
 
 def train(args, make_env, policy_cls, rnn_cls, wandb,
         eval_frac=0.1, elos={'model_random.pt': 1000}, vecenv=None, subprocess=False, queue=None):
@@ -295,7 +305,8 @@ def train(args, make_env, policy_cls, rnn_cls, wandb,
     else:
         raise ValueError(f'Invalid --vec (serial/multiprocessing/ray/native).')
 
-    if vecenv is None:
+    # if vecenv is None:
+    if True: # somehow need to contruct it every time
         vecenv = pufferlib.vector.make(
             make_env,
             env_kwargs=args['env'],
