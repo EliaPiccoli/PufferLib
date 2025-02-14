@@ -509,7 +509,7 @@ class Utilization(Thread):
             self.cpu_mem.append(100*mem.active/mem.total)
             if torch.cuda.is_available():
                 self.gpu_util.append(torch.cuda.utilization(self.device))
-                free, total = torch.cuda.mem_get_info()
+                free, total = torch.cuda.mem_get_info(self.device)
                 self.gpu_mem.append(100*free/total)
             else:
                 self.gpu_util.append(0)
