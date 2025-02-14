@@ -16,3 +16,15 @@ class Policy(pufferlib.models.Convolutional):
             framestack=framestack,
             flat_size=flat_size,
         )
+
+class WSAPolicy(pufferlib.models.WSA):
+    def __init__(self, env, emb_size=256, input_size=512, hidden_size=512,
+                 output_size=512, device='cuda:0'):
+        super().__init__(
+            env=env,
+            emb_size=emb_size,
+            input_size=input_size,
+            hidden_size=hidden_size,
+            output_size=output_size,
+            device=device
+        )

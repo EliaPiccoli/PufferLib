@@ -257,3 +257,49 @@ class ConvSequence(nn.Module):
     def get_output_shape(self):
         _c, h, w = self._input_shape
         return (self._out_channels, (h + 1) // 2, (w + 1) // 2)
+
+import skill_models as sm
+
+class WSA(nn.Module):
+    def __init__(self, env, *args, emb_size, device,
+            input_size=512, hidden_size=512, output_size=512,
+            channels_last=False, downsample=1,**kwargs):
+        super().__init__()
+        self.channels_last = channels_last
+        self.downsample = downsample
+        breakpoint()
+        self.env_name = env.env.unwrapped._game
+        
+        # TODO: load pre-trained models
+        self._load_pretrained_models()
+
+        # TODO: define adapters
+
+        self.actor = pufferlib.pytorch.layer_init(
+            nn.Linear(emb_size, env.single_action_space.n), std=0.01)
+        self.value_fn = pufferlib.pytorch.layer_init(
+            nn.Linear(output_size, 1), std=1)
+
+    def _load_pretrained_models(self):
+        return
+    
+    def _forward_skill(self):
+        return
+
+    def forward(self, observations):
+        hidden, lookup = self.encode_observations(observations)
+        actions, value = self.decode_actions(hidden, lookup)
+        return actions, value
+
+    # TODO: update forward function
+    def encode_observations(self, observations):
+        if self.channels_last:
+            observations = observations.permute(0, 3, 1, 2)
+        if self.downsample > 1:
+            observations = observations[:, :, ::self.downsample, ::self.downsample]
+        return self.network(observations.float() / 255.0), None
+
+    def decode_actions(self, flat_hidden, lookup, concat=None):
+        action = self.actor(flat_hidden)
+        value = self.value_fn(flat_hidden)
+        return action, value
