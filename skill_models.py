@@ -14,7 +14,7 @@ from state_representation.model import NatureCNN
 from object_keypoints.model import Encoder, KeyNet, RefineNet, Transporter
 from video_object_seg.model import VideoObjectSegmentationModel
 # from skills.image_completion.model import ImageCompletionModel
-# from autoencoders.model import Autoencoder
+from autoencoders.model import Autoencoder
 # from skills.frame_prediction.model import FramePredictionModel
 
 # TODO: Eventually can become: Skill(input_model, input_output, skill_model, skill_output, adapter_model, adapter_output)
@@ -27,7 +27,9 @@ def model_forward(model, x):
 
 def state_rep_input_trans(x: Tensor):
     x = x.float()
-    return F.interpolate(x, (160, 210), mode='bilinear', align_corners=True)
+    x = F.interpolate(x, size=(160, 210), mode='bilinear', align_corners=False)
+    x = x.repeat(1,4,1,1)
+    return x
 
 
 def get_state_rep_uns(game, device, expert=False):
@@ -51,9 +53,9 @@ def get_state_rep_uns(game, device, expert=False):
 
 
 def autoencoder_input_trans(x: Tensor):
-    # x is of shape 32x4x84x84, because there are 4 frame stacked, pick only the last frame and return a tensor of shape 32x1x84x84
-    x = x[:, -1:, :, :]
-    return x.float()
+    x = x.float()
+    x = F.interpolate(x, size=(84, 84), mode='bilinear', align_corners=False)
+    return x
 
 
 def get_autoencoder(game, device, expert=False):
@@ -145,8 +147,8 @@ def get_frame_prediction(game, device, expert=False):
 
 def obj_key_input_trans(x: Tensor):
     x = x.float()
-    x = x[:, -1, ...]
-    return x.unsqueeze(1)
+    x = F.interpolate(x, size=(84, 84), mode='bilinear', align_corners=False)
+    return x
 
 
 def get_object_keypoints_encoder(game, device, load_only_model=False, expert=False):
@@ -222,11 +224,10 @@ def vos_output_masks(model: VideoObjectSegmentationModel, x):
 
 def vid_obj_seg_input_trans(x: Tensor):
     x = x.float()
-    first_frames = torch.mean(x[:, :2, ...], 1)
-    second_frames = torch.mean(x[:, 2:, ...], 1)
-    s = torch.stack([first_frames, second_frames])
-    norm_s = s / 255.
-    return norm_s.permute(1, 0, 2, 3)
+    x = F.interpolate(x, size=(84, 84), mode='bilinear', align_corners=False)
+    x = x.repeat(1,2,1,1)
+    norm_s = x / 255.
+    return norm_s
 
 
 def get_video_object_segmentation(game, device, load_only_model=False, expert=False):

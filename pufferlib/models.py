@@ -260,6 +260,10 @@ class ConvSequence(nn.Module):
 
 import skill_models as sm
 
+class Flatten(nn.Module):
+    def forward(self, x):
+        return torch.reshape(x, (x.size(0), -1))
+
 class WSA(nn.Module):
     def __init__(self, env, *args, emb_size, device,
             input_size=512, hidden_size=512, output_size=512,
@@ -267,37 +271,156 @@ class WSA(nn.Module):
         super().__init__()
         self.channels_last = channels_last
         self.downsample = downsample
-        breakpoint()
         self.env_name = env.env.unwrapped._game
+        self.device = device
+        self.emb_size = emb_size
+        self.n_models = 4
         
-        # TODO: load pre-trained models
         self._load_pretrained_models()
 
-        # TODO: define adapters
+        self._create_adapters()
+
+        self.weight_network = nn.Sequential(
+            pufferlib.pytorch.layer_init(nn.Linear(emb_size*2, 1), std=1),
+            nn.ReLU(),
+        )
 
         self.actor = pufferlib.pytorch.layer_init(
             nn.Linear(emb_size, env.single_action_space.n), std=0.01)
         self.value_fn = pufferlib.pytorch.layer_init(
-            nn.Linear(output_size, 1), std=1)
+            nn.Linear(emb_size, 1), std=1)
 
     def _load_pretrained_models(self):
-        return
+        self.pretrained_models = []
+        exp = self.env_name == "breakout"
+        if self.env_name not in ("beam_rider", "enduro", "road_runner"):
+            self.pretrained_models.append(sm.get_state_rep_uns(self.env_name, self.device, exp))
+        self.pretrained_models.append(sm.get_object_keypoints_encoder(self.env_name, self.device, True, exp))
+        self.pretrained_models.append(sm.get_object_keypoints_keynet(self.env_name, self.device, True, exp))
+        self.pretrained_models.append(sm.get_video_object_segmentation(self.env_name, self.device, True, exp))
+        self.state_emb_model = sm.get_autoencoder(self.env_name, self.device, exp)
     
-    def _forward_skill(self):
-        return
+    def _create_adapters(self):
+        # 1x1 conv
+        self.__vobj_seg_adapter = nn.Sequential(
+            nn.Conv2d(20, 16, 1),
+            nn.Conv2d(16, 16, 5, 5),
+            nn.ReLU(),
+        )
+        self.__kpt_enc_adapter = nn.Sequential(
+            nn.Conv2d(128, 32, 1),
+            nn.Conv2d(32, 32, 6),
+            nn.ReLU(),
+        )
+        self.__kpt_key_adapter = nn.Sequential(
+            nn.Conv2d(4, 16, 1),
+            nn.Conv2d(16, 16, 6),
+            nn.ReLU()
+        )
+        self.c_adapters = {
+            "obj_key_enc": self.__kpt_enc_adapter,
+            "obj_key_key": self.__kpt_key_adapter,
+            "vid_obj_seg": self.__vobj_seg_adapter
+        }
+        self.__vobj_seg_adapter.to(self.device)
+        self.__kpt_enc_adapter.to(self.device)
+        self.__kpt_key_adapter.to(self.device)
+
+        self.adapters = nn.ModuleList()
+        # state
+        self.adapters.append(
+            nn.Sequential(
+                pufferlib.pytorch.layer_init(nn.Linear(512, self.emb_size)),
+                nn.LayerNorm(self.emb_size),
+                nn.ReLU()
+            )
+        )
+        # obj_key_e
+        self.adapters.append(
+            nn.Sequential(
+                Flatten(),
+                pufferlib.pytorch.layer_init(nn.Linear(32*16*16, self.emb_size)),
+                nn.LayerNorm(self.emb_size),
+                nn.ReLU()
+            )
+        )
+        # obj_key_k
+        self.adapters.append(
+            nn.Sequential(
+                Flatten(),
+                pufferlib.pytorch.layer_init(nn.Linear(16*16*16, self.emb_size)),
+                nn.LayerNorm(self.emb_size),
+                nn.ReLU()
+            )
+        )
+        # vid_seg
+        self.adapters.append(
+            nn.Sequential(
+                Flatten(),
+                pufferlib.pytorch.layer_init(nn.Linear(16*16*16, self.emb_size)),
+                nn.LayerNorm(self.emb_size),
+                nn.ReLU()
+            )
+        )
+        self.adapters.to(self.device)
+
+        self.state_adapter = nn.Sequential(
+            Flatten(),
+            pufferlib.pytorch.layer_init(nn.Linear(64*16*16, self.emb_size)),
+            nn.LayerNorm(self.emb_size),
+            nn.ReLU()
+        )
+        self.state_adapter.to(self.device)
+
+    def _forward_pretrain_model(self, m: sm.Skill, x):
+        out = m.input_adapter(x)
+        out = m.skill_output(m.skill_model, out)
+        out = self.c_adapters[m.name](out) if m.name in self.c_adapters else out
+
+        return out
+
+    def forward_model(self, obs):
+        batch_size = obs.size(0)
+        # forward each model
+        pt_embs = torch.zeros((batch_size, self.n_models, self.emb_size), dtype=torch.float, device=self.device)
+        for i in range(self.n_models):
+            tmp = self._forward_pretrain_model(self.pretrained_models[i], obs)
+            pt_embs[:, i, :] = self.adapters[i](tmp)
+        
+        state_out = self._forward_pretrain_model(self.state_emb_model, obs)
+        s_out = self.state_adapter(state_out)
+
+        # compute weights
+        ww = torch.zeros((batch_size, self.n_models, 1), dtype=torch.float, device=self.device)
+        for i in range(self.n_models):
+            tmp = torch.concat((s_out, pt_embs[:, i, :]), dim=1)
+            ww[:, i, :] = self.weight_network(tmp)
+
+        _sum = torch.sum(ww, 1)
+        # Clamp _sum to avoid zero (or near-zero values)
+        _sum = torch.clamp(_sum, min=1e-8)
+        # Perform the division safely
+        ww = ww / _sum[:, None, :]
+        # Optionally, handle NaNs or Infs if they still occur
+        ww = torch.nan_to_num(ww, nan=0.0, posinf=0.0, neginf=0.0)
+
+        # concatenate emb
+        tmp_r = pt_embs * ww
+        R = tmp_r.sum(dim=1)
+
+        return R
 
     def forward(self, observations):
         hidden, lookup = self.encode_observations(observations)
         actions, value = self.decode_actions(hidden, lookup)
         return actions, value
 
-    # TODO: update forward function
     def encode_observations(self, observations):
         if self.channels_last:
             observations = observations.permute(0, 3, 1, 2)
         if self.downsample > 1:
             observations = observations[:, :, ::self.downsample, ::self.downsample]
-        return self.network(observations.float() / 255.0), None
+        return self.forward_model(observations.float()), None
 
     def decode_actions(self, flat_hidden, lookup, concat=None):
         action = self.actor(flat_hidden)

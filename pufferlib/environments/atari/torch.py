@@ -18,7 +18,7 @@ class Policy(pufferlib.models.Convolutional):
         )
 
 class WSAPolicy(pufferlib.models.WSA):
-    def __init__(self, env, emb_size=256, input_size=512, hidden_size=512,
+    def __init__(self, env, emb_size=256, input_size=256, hidden_size=256,
                  output_size=512, device='cuda:0'):
         super().__init__(
             env=env,
