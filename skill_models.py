@@ -26,7 +26,6 @@ def model_forward(model, x):
 
 
 def state_rep_input_trans(x: Tensor):
-    x = x.float()
     x = F.interpolate(x, size=(160, 210), mode='bilinear', align_corners=False)
     x = x.repeat(1,4,1,1)
     return x
@@ -44,7 +43,7 @@ def get_state_rep_uns(game, device, expert=False):
     # setattr(n, 'no_downsample', True)
     # setattr(n, 'end_with_relu', False)
     model = NatureCNN(4, 512)
-    model.load_state_dict(torch.load(model_path, map_location=device), strict=True)
+    model.load_state_dict(torch.load(model_path, map_location=device, weights_only=True), strict=True)
     model.eval()
     model.to(device)
     adapter = None
@@ -53,7 +52,6 @@ def get_state_rep_uns(game, device, expert=False):
 
 
 def autoencoder_input_trans(x: Tensor):
-    x = x.float()
     x = F.interpolate(x, size=(84, 84), mode='bilinear', align_corners=False)
     return x
 
@@ -65,7 +63,7 @@ def get_autoencoder(game, device, expert=False):
         model_path = "skills/models/" + game.lower() + "-nature-encoder.pt"
 
     model = Autoencoder().to(device)
-    model.load_state_dict(torch.load(model_path, map_location=device), strict=True)
+    model.load_state_dict(torch.load(model_path, map_location=device, weights_only=True), strict=True)
     model.eval()
     adapter = None
     input_transformation_function = autoencoder_input_trans
@@ -146,7 +144,6 @@ def get_frame_prediction(game, device, expert=False):
 
 
 def obj_key_input_trans(x: Tensor):
-    x = x.float()
     x = F.interpolate(x, size=(84, 84), mode='bilinear', align_corners=False)
     return x
 
@@ -163,7 +160,7 @@ def get_object_keypoints_encoder(game, device, load_only_model=False, expert=Fal
     k = KeyNet(1, 4)
     r = RefineNet(1)
     model = Transporter(e, k, r)
-    model.load_state_dict(torch.load(model_path, map_location=device), strict=True)
+    model.load_state_dict(torch.load(model_path, map_location=device, weights_only=True), strict=True)
     model.eval()
     model.to(device)
 
@@ -196,7 +193,7 @@ def get_object_keypoints_keynet(game, device, load_only_model=False, expert=Fals
     k = KeyNet(1, 4)
     r = RefineNet(1)
     model = Transporter(e, k, r)
-    model.load_state_dict(torch.load(model_path, map_location=device), strict=True)
+    model.load_state_dict(torch.load(model_path, map_location=device, weights_only=True), strict=True)
     model.eval()
     model.to(device)
 
@@ -223,7 +220,6 @@ def vos_output_masks(model: VideoObjectSegmentationModel, x):
 
 
 def vid_obj_seg_input_trans(x: Tensor):
-    x = x.float()
     x = F.interpolate(x, size=(84, 84), mode='bilinear', align_corners=False)
     x = x.repeat(1,2,1,1)
     norm_s = x / 255.
@@ -237,7 +233,7 @@ def get_video_object_segmentation(game, device, load_only_model=False, expert=Fa
         model_path = "skills/models/" + game.lower() + "-vid-obj-seg.pt"
 
     model = VideoObjectSegmentationModel(device)
-    model.load_state_dict(torch.load(model_path, map_location=device), strict=True)
+    model.load_state_dict(torch.load(model_path, map_location=device, weights_only=True), strict=True)
     model.eval()
     model.to(device)
 
