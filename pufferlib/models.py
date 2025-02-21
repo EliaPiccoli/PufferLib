@@ -260,10 +260,6 @@ class ConvSequence(nn.Module):
 
 import skill_models as sm
 
-class Flatten(nn.Module):
-    def forward(self, x):
-        return torch.reshape(x, (x.size(0), -1))
-
 class WSA(nn.Module):
     def __init__(self, env, *args, emb_size, device,
             input_size=512, hidden_size=512, output_size=512,
@@ -326,7 +322,7 @@ class WSA(nn.Module):
         self.__kpt_enc_adapter.to(self.device)
         self.__kpt_key_adapter.to(self.device)
 
-        self.adapters = nn.ModuleList()
+        self.adapters = nn.ModuleList([])
         # state
         self.adapters.append(
             nn.Sequential(
@@ -338,7 +334,6 @@ class WSA(nn.Module):
         # obj_key_e
         self.adapters.append(
             nn.Sequential(
-                Flatten(),
                 pufferlib.pytorch.layer_init(nn.Linear(32*16*16, self.emb_size)),
                 nn.LayerNorm(self.emb_size),
                 nn.ReLU()
@@ -347,7 +342,6 @@ class WSA(nn.Module):
         # obj_key_k
         self.adapters.append(
             nn.Sequential(
-                Flatten(),
                 pufferlib.pytorch.layer_init(nn.Linear(16*16*16, self.emb_size)),
                 nn.LayerNorm(self.emb_size),
                 nn.ReLU()
@@ -356,7 +350,6 @@ class WSA(nn.Module):
         # vid_seg
         self.adapters.append(
             nn.Sequential(
-                Flatten(),
                 pufferlib.pytorch.layer_init(nn.Linear(16*16*16, self.emb_size)),
                 nn.LayerNorm(self.emb_size),
                 nn.ReLU()
@@ -365,9 +358,7 @@ class WSA(nn.Module):
         self.adapters.to(self.device)
 
         self.state_adapter = nn.Sequential(
-            Flatten(),
             pufferlib.pytorch.layer_init(nn.Linear(64*16*16, self.emb_size)),
-            nn.LayerNorm(self.emb_size),
             nn.ReLU()
         )
         self.state_adapter.to(self.device)
@@ -375,38 +366,34 @@ class WSA(nn.Module):
     def _forward_pretrain_model(self, m: sm.Skill, x):
         out = m.input_adapter(x)
         out = m.skill_output(m.skill_model, out)
-        out = self.c_adapters[m.name](out) if m.name in self.c_adapters else out
+        if m.name in self.c_adapters:
+            out = self.c_adapters[m.name](out)
 
-        return out
+        return out if "state" in m.name else out.view(out.size(0), -1)
 
     def forward_model(self, obs):
-        batch_size = obs.size(0)
-        # forward each model
-        pt_embs = torch.zeros((batch_size, self.n_models, self.emb_size), dtype=torch.float, device=self.device)
-        for i in range(self.n_models):
-            tmp = self._forward_pretrain_model(self.pretrained_models[i], obs)
-            pt_embs[:, i, :] = self.adapters[i](tmp)
-        
-        state_out = self._forward_pretrain_model(self.state_emb_model, obs)
-        s_out = self.state_adapter(state_out)
+        pt_out = []
+        for i, (model, adapter) in enumerate(zip(self.pretrained_models, self.adapters)):
+            if i <= self.n_models:
+                pt_out.append(adapter(self._forward_pretrain_model(model, obs)))
+            else:
+                break
+        pt_embs = torch.stack(pt_out, dim=1)  # Shape: [batch_size, n_models, emb_size]
 
-        # compute weights
-        ww = torch.zeros((batch_size, self.n_models, 1), dtype=torch.float, device=self.device)
-        for i in range(self.n_models):
-            tmp = torch.concat((s_out, pt_embs[:, i, :]), dim=1)
-            ww[:, i, :] = self.weight_network(tmp)
+        # Compute state embedding
+        s_out = self.state_adapter(self._forward_pretrain_model(self.state_emb_model, obs))  # Shape: [batch_size, emb_size]
 
-        _sum = torch.sum(ww, 1)
-        # Clamp _sum to avoid zero (or near-zero values)
-        _sum = torch.clamp(_sum, min=1e-8)
-        # Perform the division safely
-        ww = ww / _sum[:, None, :]
-        # Optionally, handle NaNs or Infs if they still occur
-        ww = torch.nan_to_num(ww, nan=0.0, posinf=0.0, neginf=0.0)
+        # Efficient weight computation (avoid manual expand + cat)
+        s_out_expanded = s_out.unsqueeze(1).expand(-1, self.n_models, -1)  # [batch_size, n_models, emb_size]
+        weight_inputs = torch.cat((s_out_expanded, pt_embs), dim=2)  # [batch_size, n_models, emb_size*2]
 
-        # concatenate emb
-        tmp_r = pt_embs * ww
-        R = tmp_r.sum(dim=1)
+        # Compute weights in one go
+        ww = self.weight_network(weight_inputs)  # [batch_size, n_models, 1]
+        ww = ww / ww.sum(dim=1, keepdim=True).clamp_(min=1e-8)  # Normalize weights safely
+        ww = torch.nan_to_num(ww, nan=0.0, posinf=0.0, neginf=0.0)  # Handle NaNs/Infs
+
+        # Faster weighted summation using batch matrix multiplication (bmm)
+        R = (pt_embs*ww).sum(dim=1)  # [batch_size, emb_size]
 
         return R
 
@@ -426,3 +413,14 @@ class WSA(nn.Module):
         action = self.actor(flat_hidden)
         value = self.value_fn(flat_hidden)
         return action, value
+    
+    def train(self, mode=True):
+        self.training = mode
+        for module in self.children():
+            module.train(mode)
+        
+        for i in range(self.n_models):
+            self.pretrained_models[i].skill_model.eval()
+        self.state_adapter.skill_model.eval()
+        
+        return self
