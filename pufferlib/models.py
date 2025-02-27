@@ -267,7 +267,7 @@ class WSA(nn.Module):
         super().__init__()
         self.channels_last = channels_last
         self.downsample = downsample
-        self.env_name = env.env.unwrapped._game
+        self.env_name = env.env.unwrapped._game.replace("_", "")
         self.device = device
         self.emb_size = emb_size
         self.n_models = 4
@@ -289,8 +289,9 @@ class WSA(nn.Module):
     def _load_pretrained_models(self):
         self.pretrained_models = []
         exp = self.env_name == "breakout"
-        if self.env_name not in ("beam_rider", "enduro", "road_runner"):
+        if self.env_name not in ("beamrider", "enduro", "roadrunner"):
             self.pretrained_models.append(sm.get_state_rep_uns(self.env_name, self.device, exp))
+        else: self.n_models -= 1
         self.pretrained_models.append(sm.get_object_keypoints_encoder(self.env_name, self.device, True, exp))
         self.pretrained_models.append(sm.get_object_keypoints_keynet(self.env_name, self.device, True, exp))
         self.pretrained_models.append(sm.get_video_object_segmentation(self.env_name, self.device, True, exp))
@@ -324,17 +325,18 @@ class WSA(nn.Module):
 
         self.adapters = nn.ModuleList([])
         # state
-        self.adapters.append(
-            nn.Sequential(
-                pufferlib.pytorch.layer_init(nn.Linear(512, self.emb_size)),
-                nn.LayerNorm(self.emb_size),
-                nn.ReLU()
+        if self.env_name not in ("beamrider", "enduro", "roadrunner"):
+            self.adapters.append(
+                nn.Sequential(
+                    pufferlib.pytorch.layer_init(nn.Linear(512, self.emb_size), std=0.01),
+                    nn.LayerNorm(self.emb_size),
+                    nn.ReLU()
+                )
             )
-        )
         # obj_key_e
         self.adapters.append(
             nn.Sequential(
-                pufferlib.pytorch.layer_init(nn.Linear(32*16*16, self.emb_size)),
+                pufferlib.pytorch.layer_init(nn.Linear(32*16*16, self.emb_size), std=0.01),
                 nn.LayerNorm(self.emb_size),
                 nn.ReLU()
             )
@@ -342,7 +344,7 @@ class WSA(nn.Module):
         # obj_key_k
         self.adapters.append(
             nn.Sequential(
-                pufferlib.pytorch.layer_init(nn.Linear(16*16*16, self.emb_size)),
+                pufferlib.pytorch.layer_init(nn.Linear(16*16*16, self.emb_size), std=0.01),
                 nn.LayerNorm(self.emb_size),
                 nn.ReLU()
             )
@@ -350,7 +352,7 @@ class WSA(nn.Module):
         # vid_seg
         self.adapters.append(
             nn.Sequential(
-                pufferlib.pytorch.layer_init(nn.Linear(16*16*16, self.emb_size)),
+                pufferlib.pytorch.layer_init(nn.Linear(16*16*16, self.emb_size), std=0.01),
                 nn.LayerNorm(self.emb_size),
                 nn.ReLU()
             )
@@ -358,14 +360,16 @@ class WSA(nn.Module):
         self.adapters.to(self.device)
 
         self.state_adapter = nn.Sequential(
-            pufferlib.pytorch.layer_init(nn.Linear(64*16*16, self.emb_size)),
+            pufferlib.pytorch.layer_init(nn.Linear(64*16*16, self.emb_size), std=0.01),
+            nn.LayerNorm(self.emb_size),
             nn.ReLU()
         )
         self.state_adapter.to(self.device)
 
     def _forward_pretrain_model(self, m: sm.Skill, x):
-        out = m.input_adapter(x)
-        out = m.skill_output(m.skill_model, out)
+        with torch.no_grad():
+            out = m.input_adapter(x)
+            out = m.skill_output(m.skill_model, out)
         if m.name in self.c_adapters:
             out = self.c_adapters[m.name](out)
 
@@ -374,7 +378,7 @@ class WSA(nn.Module):
     def forward_model(self, obs):
         pt_out = []
         for i, (model, adapter) in enumerate(zip(self.pretrained_models, self.adapters)):
-            if i <= self.n_models:
+            if i < self.n_models:
                 pt_out.append(adapter(self._forward_pretrain_model(model, obs)))
             else:
                 break
@@ -394,7 +398,7 @@ class WSA(nn.Module):
 
         # Faster weighted summation using batch matrix multiplication (bmm)
         R = (pt_embs*ww).sum(dim=1)  # [batch_size, emb_size]
-
+        
         return R
 
     def forward(self, observations):
@@ -419,8 +423,13 @@ class WSA(nn.Module):
         for module in self.children():
             module.train(mode)
         
-        for i in range(self.n_models):
-            self.pretrained_models[i].skill_model.eval()
+        for ptmodel in self.pretrained_models:
+            ptmodel.eval()
+            for param in ptmodel.parameters():
+                param.requires_grad = False
+                 
         self.state_adapter.skill_model.eval()
+        for param in self.state_adapter.skill_model.parameters():
+            param.requires_grad = False
         
         return self
