@@ -122,7 +122,7 @@ with open(f"stats_{env_name}.txt", "w") as f:
         out = cv2.VideoWriter(f'./videos/{name}.mp4',fourcc, 30.0, (160,210))
         print(f"Starting {name}...")
 
-        f.write("*" * 50 )
+        f.write("*" * 50 + "\n")
         with tqdm(total=episodes) as pbar:
             for i in range(episodes):
                 obss = []
