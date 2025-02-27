@@ -46,6 +46,7 @@ def get_state_rep_uns(game, device, expert=False):
     model.load_state_dict(torch.load(model_path, map_location=device, weights_only=True), strict=True)
     model.eval()
     model.to(device)
+    model = torch.jit.script(model)
     adapter = None
 
     return Skill("state_rep_uns", input_transformation_function, model, model_forward, adapter)
@@ -65,6 +66,8 @@ def get_autoencoder(game, device, expert=False):
     model = Autoencoder().to(device)
     model.load_state_dict(torch.load(model_path, map_location=device, weights_only=True), strict=True)
     model.eval()
+    model = torch.jit.script(model)
+
     adapter = None
     input_transformation_function = autoencoder_input_trans
     return Skill("autoencoder", input_transformation_function, model.encoder, model_forward, adapter)
@@ -163,6 +166,7 @@ def get_object_keypoints_encoder(game, device, load_only_model=False, expert=Fal
     model.load_state_dict(torch.load(model_path, map_location=device, weights_only=True), strict=True)
     model.eval()
     model.to(device)
+    model = torch.jit.script(model)
 
     if not load_only_model:
         raise NotImplementedError("Adapter not implemented for object_keypoints_encoder")
@@ -196,6 +200,7 @@ def get_object_keypoints_keynet(game, device, load_only_model=False, expert=Fals
     model.load_state_dict(torch.load(model_path, map_location=device, weights_only=True), strict=True)
     model.eval()
     model.to(device)
+    model = torch.jit.script(model)
 
     if not load_only_model:
         raise NotImplementedError("Adapter not implemented for object_keypoints_keynet")
