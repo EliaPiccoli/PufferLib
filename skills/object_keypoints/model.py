@@ -110,7 +110,7 @@ def compute_keypoint_location_mean(features):
     u_col = S_col.mul(torch.linspace(-1, 1, S_col.size(-1), dtype=features.dtype, device=features.device)).sum(-1)
     return torch.stack((u_row, u_col), -1) # N, K, 2
 
-def gaussian_map(features, std=0.2):
+def gaussian_map(features, std:float=0.2):
     # features: (N, K, H, W)
     width, height = features.size(-1), features.size(-2)
     mu = compute_keypoint_location_mean(features)  # N, K, 2
