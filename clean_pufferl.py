@@ -108,6 +108,9 @@ def evaluate(data):
             else:
                 actions, logprob, _, value = policy(o_device)
 
+            # Clip rewards
+            r = torch.clamp(r, -1, 1)
+
             if 'cuda' in config.device:
                 torch.cuda.synchronize(config.device)
 
@@ -272,9 +275,9 @@ def train(data):
                 profile, data.losses, data.stats, data.msg)
             data.stats = defaultdict(list)
 
-        if data.epoch % config.checkpoint_interval == 0 or done_training:
-            save_checkpoint(data)
-            data.msg = f'Checkpoint saved at update {data.epoch}'
+        # if data.epoch % config.checkpoint_interval == 0 or done_training:
+        #     save_checkpoint(data)
+        #     data.msg = f'Checkpoint saved at update {data.epoch}'
 
 def mean_and_log(data):
     for k in list(data.stats.keys()):
@@ -307,8 +310,8 @@ def close(data):
     if data.wandb is not None:
         artifact_name = f"{config.exp_id}_model"
         artifact = data.wandb.Artifact(artifact_name, type="model")
-        model_path = save_checkpoint(data)
-        artifact.add_file(model_path)
+        # model_path = save_checkpoint(data)
+        # artifact.add_file(model_path)
         data.wandb.run.log_artifact(artifact)
         data.wandb.finish()
 
@@ -395,7 +398,7 @@ class Experience:
 
         obs_dtype = pufferlib.pytorch.numpy_to_torch_dtype_dict[obs_dtype]
         atn_dtype = pufferlib.pytorch.numpy_to_torch_dtype_dict[atn_dtype]
-        pin = device == 'cuda' and cpu_offload
+        pin = 'cuda' in device and cpu_offload
         obs_device = device if not pin else 'cpu'
         self.obs=torch.zeros(batch_size, *obs_shape, dtype=obs_dtype,
             pin_memory=pin, device=device if not pin else 'cpu')
