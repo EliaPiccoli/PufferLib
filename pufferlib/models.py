@@ -271,6 +271,7 @@ class WSA(nn.Module):
         self.device = device
         self.emb_size = emb_size
         self.n_models = 4
+        self.print_ww = False
         
         self._load_pretrained_models()
 
@@ -396,6 +397,9 @@ class WSA(nn.Module):
         ww = ww / ww.sum(dim=1, keepdim=True).clamp_(min=1e-8)  # Normalize weights safely
         ww = torch.nan_to_num(ww, nan=0.0, posinf=0.0, neginf=0.0)  # Handle NaNs/Infs
 
+        if self.print_ww:
+            self._print_ww(ww)
+
         # Faster weighted summation using batch matrix multiplication (bmm)
         R = (pt_embs*ww).sum(dim=1)  # [batch_size, emb_size]
         
@@ -433,3 +437,9 @@ class WSA(nn.Module):
             param.requires_grad = False
         
         return self
+    
+    def _print_ww(self, ww):
+        with torch.no_grad():
+            mean_per_model = ww.mean(dim=0)  # Shape: [n_models, 1]
+            std_per_model = ww.std(dim=0)    # Shape: [n_models, 1]
+            print(f"Shape: {ww.shape} - Mean: {mean_per_model.squeeze()} - std: {std_per_model.squeeze()}")

@@ -109,7 +109,7 @@ def evaluate(data):
                 actions, logprob, _, value = policy(o_device)
 
             # Clip rewards
-            r = torch.clamp(r, -1, 1)
+            # r = torch.clamp(r, -1, 1)
 
             if 'cuda' in config.device:
                 torch.cuda.synchronize(config.device)
@@ -672,7 +672,15 @@ def fmt_perf(name, time, uptime):
 
 # TODO: Add env name to print_dashboard
 def print_dashboard(env_name, utilization, global_step, epoch,
-        profile, losses, stats, msg, clear=False, max_stats=[0]):
+        profile, losses, stats, msg, clear=False, max_stats=[0], skip=True):
+
+    if skip:
+        s = f"Steps: {global_step}, SPS: {int(profile.SPS)}, Remaining: {int(profile.remaining)} s"
+        if "episode_return" in stats:
+            s += f" - Episode return: {stats['episode_return']}, Episode Length: {stats['episode_length']}"
+        print(s)
+        return
+
     console = Console()
     if clear:
         console.clear()
