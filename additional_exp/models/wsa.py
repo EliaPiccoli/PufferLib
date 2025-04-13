@@ -5,6 +5,7 @@ sys.path.append("../")
 import numpy as np
 import torch
 import torch.nn as nn 
+from torch.distributions.normal import Normal
 
 import models.skill_models as sm
 
@@ -33,11 +34,18 @@ class WSA_Robot(nn.Module):
             nn.ReLU(),
         )
 
-        self.actor = pufferlib.pytorch.layer_init(
-            
-            nn.Linear(emb_size, np.prod(env.single_action_space.shape)), std=0.01)
-        self.value_fn = pufferlib.pytorch.layer_init(
-            nn.Linear(emb_size, 1), std=1)
+        self.actor = nn.Sequential(
+            pufferlib.pytorch.layer_init(nn.Linear(emb_size, 256), std=0.01),
+            pufferlib.pytorch.layer_init(nn.Linear(256, np.prod(env.single_action_space.shape)))
+
+        )
+        
+        self.actor_logstd = nn.Parameter(torch.ones(1, np.prod(env.single_action_space.shape)) * -0.5)
+        
+        self.value_fn = nn.Sequential(
+            pufferlib.pytorch.layer_init(nn.Linear(emb_size, 256), std=0.01),
+            pufferlib.pytorch.layer_init(nn.Linear(256, 1), std=1)
+        )
 
     def _load_pretrained_models(self):
         self.pretrained_models = []
@@ -55,17 +63,17 @@ class WSA_Robot(nn.Module):
         self.__vobj_seg_adapter = nn.Sequential(
             nn.Conv2d(20, 16, 1),
             nn.Conv2d(16, 16, 5, 5),
-            nn.ReLU(),
+            # nn.ReLU(),
         )
         self.__kpt_enc_adapter = nn.Sequential(
             nn.Conv2d(128, 32, 1),
             nn.Conv2d(32, 32, 6),
-            nn.ReLU(),
+            # nn.ReLU(),
         )
         self.__kpt_key_adapter = nn.Sequential(
             nn.Conv2d(4, 16, 1),
             nn.Conv2d(16, 16, 6),
-            nn.ReLU()
+            # nn.ReLU()
         )
         self.c_adapters = {
             "obj_key_enc": self.__kpt_enc_adapter,
@@ -91,7 +99,7 @@ class WSA_Robot(nn.Module):
             nn.Sequential(
                 pufferlib.pytorch.layer_init(nn.Linear(1000, self.emb_size), std=0.01),
                 nn.LayerNorm(self.emb_size),
-                nn.ReLU()
+                # nn.ReLU()
             )
         )
         # resnet
@@ -99,7 +107,7 @@ class WSA_Robot(nn.Module):
             nn.Sequential(
                 pufferlib.pytorch.layer_init(nn.Linear(8192, self.emb_size), std=0.01),
                 nn.LayerNorm(self.emb_size),
-                nn.ReLU()
+                # nn.ReLU()
             )
         )
         # not used
@@ -114,14 +122,14 @@ class WSA_Robot(nn.Module):
 
         # clip?
         self.state_adapter = nn.Sequential(
-            pufferlib.pytorch.layer_init(nn.Linear(64*16*16, self.emb_size), std=0.01),
+            pufferlib.pytorch.layer_init(nn.Linear(512, self.emb_size), std=0.01),
             nn.LayerNorm(self.emb_size),
             nn.ReLU()
         )
         self.state_adapter.to(self.device)
 
     def _forward_pretrain_model(self, m: sm.Skill, x):
-        print(f"{m.name} input shape: {x.shape}")
+        # print(f"{m.name} input shape: {x.shape}, dtype: {x.dtype}")
         with torch.no_grad():
             if m.input_adapter:
                 x = m.input_adapter(x)
@@ -129,17 +137,24 @@ class WSA_Robot(nn.Module):
         if m.name in self.c_adapters:
             out = self.c_adapters[m.name](out)
 
+        # print(f"output shape: {out.shape}, dtype: {out.dtype}")
         return out if "state" in m.name else out.view(out.size(0), -1)
 
     def forward_model(self, obs):
         pt_out = []
+        # print(f"obs shape: {obs.shape}, dtype: {obs.dtype}")
         for i, (model, adapter) in enumerate(zip(self.pretrained_models, self.adapters)):
             if i < self.n_models:
                 pt_out.append(adapter(self._forward_pretrain_model(model, obs)))
             else:
                 break
         pt_embs = torch.stack(pt_out, dim=1)  # Shape: [batch_size, n_models, emb_size]
-
+        # print(f"pt_embs values: {pt_embs}")
+        # Print the magnitude and mean value of pt_embs for each batch
+        # batch_magnitudes = torch.norm(pt_embs, dim=-1)
+        # batch_means = pt_embs.mean(dim=-1)
+        # for i, (magnitude, mean) in enumerate(zip(batch_magnitudes, batch_means)):
+        #     print(f"Batch {i}: Magnitude = {magnitude}, Mean = {mean}")
         # Compute state embedding
         s_out = self.state_adapter(self._forward_pretrain_model(self.state_emb_model, obs))  # Shape: [batch_size, emb_size]
 
@@ -149,8 +164,11 @@ class WSA_Robot(nn.Module):
 
         # Compute weights in one go
         ww = self.weight_network(weight_inputs)  # [batch_size, n_models, 1]
+        # print(f"ww values: {ww}")
         ww = ww / ww.sum(dim=1, keepdim=True).clamp_(min=1e-8)  # Normalize weights safely
         ww = torch.nan_to_num(ww, nan=0.0, posinf=0.0, neginf=0.0)  # Handle NaNs/Infs
+        
+        
 
         # Faster weighted summation using batch matrix multiplication (bmm)
         R = (pt_embs*ww).sum(dim=1)  # [batch_size, emb_size]
@@ -166,8 +184,15 @@ class WSA_Robot(nn.Module):
     def get_action(self, observations, **kwargs):
         return self(observations)[0]
     
-    def get_action_and_value(self, observations):
-        return self(observations)
+    def get_action_and_value(self, observations, action=None):
+        hidden, lookup = self.encode_observations(observations)
+        action_mean = self.actor(hidden)
+        action_logstd = self.actor_logstd.expand_as(action_mean)
+        action_std = torch.exp(action_logstd)
+        probs = Normal(action_mean, action_std)
+        if action is None:
+            action = probs.sample()
+        return action, probs.log_prob(action).sum(1), probs.entropy().sum(1), self.value_fn(hidden)
     
     def get_value(self, observations):
         return self(observations)[1]

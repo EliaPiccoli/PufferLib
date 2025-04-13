@@ -60,7 +60,7 @@ class Args:
     """the id of the environment"""
     include_state: bool = False
     """whether to include state information in observations"""
-    total_timesteps: int = 10_000_000
+    total_timesteps: int = 7_500_000
     """total timesteps of the experiments"""
     learning_rate: float = 3e-4
     """the learning rate of the optimizer"""
