@@ -28,3 +28,39 @@ class WSAPolicy(pufferlib.models.WSA):
             output_size=output_size,
             device=device
         )
+
+class EnsemblePolicy(pufferlib.models.Ensemble):
+    def __init__(self, env, emb_size=256, input_size=256, hidden_size=256,
+                 output_size=512, device='cuda:0'):
+        super().__init__(
+            env=env,
+            emb_size=emb_size,
+            input_size=input_size,
+            hidden_size=hidden_size,
+            output_size=output_size,
+            device=device
+        )
+
+class WSAFTPolicy(pufferlib.models.WSAFT):
+    def __init__(self, env, emb_size=256, input_size=256, hidden_size=256,
+                 output_size=512, device='cuda:0'):
+        super().__init__(
+            env=env,
+            emb_size=emb_size,
+            input_size=input_size,
+            hidden_size=hidden_size,
+            output_size=output_size,
+            device=device
+        )
+
+class WSASinglePolicy(pufferlib.models.WSASingle):
+    def __init__(self, env, emb_size=256, input_size=256, hidden_size=256,
+                 output_size=512, device='cuda:0'):
+        super().__init__(
+            env=env,
+            emb_size=emb_size,
+            input_size=input_size,
+            hidden_size=hidden_size,
+            output_size=output_size,
+            device=device
+        )
