@@ -31,7 +31,7 @@ def state_rep_input_trans(x: Tensor):
     return x
 
 
-def get_state_rep_uns(game, device, expert=False):
+def get_state_rep_uns(game, device, expert=False, dont_load=False):
     input_transformation_function = state_rep_input_trans
     if expert:
         model_path = "skills/models/" + game.lower() + "-state-rep-expert.pt"
@@ -43,8 +43,9 @@ def get_state_rep_uns(game, device, expert=False):
     # setattr(n, 'no_downsample', True)
     # setattr(n, 'end_with_relu', False)
     model = NatureCNN(4, 512)
-    model.load_state_dict(torch.load(model_path, map_location=device, weights_only=True), strict=True)
-    model.eval()
+    if dont_load:
+        model.load_state_dict(torch.load(model_path, map_location=device, weights_only=True), strict=True)
+        model.eval()
     model.to(device)
     model = torch.jit.script(model)
     adapter = None
@@ -57,15 +58,16 @@ def autoencoder_input_trans(x: Tensor):
     return x
 
 
-def get_autoencoder(game, device, expert=False):
+def get_autoencoder(game, device, expert=False, dont_load=False):
     if expert:
         model_path = "skills/models/" + game.lower() + "-nature-encoder-expert.pt"
     else:
         model_path = "skills/models/" + game.lower() + "-nature-encoder.pt"
 
     model = Autoencoder().to(device)
-    model.load_state_dict(torch.load(model_path, map_location=device, weights_only=True), strict=True)
-    model.eval()
+    if dont_load:
+        model.load_state_dict(torch.load(model_path, map_location=device, weights_only=True), strict=True)
+        model.eval()
     model = torch.jit.script(model)
 
     adapter = None
@@ -151,7 +153,7 @@ def obj_key_input_trans(x: Tensor):
     return x
 
 
-def get_object_keypoints_encoder(game, device, load_only_model=False, expert=False):
+def get_object_keypoints_encoder(game, device, load_only_model=False, expert=False, dont_load=False):
     input_transformation_function = obj_key_input_trans
 
     if expert:
@@ -163,8 +165,9 @@ def get_object_keypoints_encoder(game, device, load_only_model=False, expert=Fal
     k = KeyNet(1, 4)
     r = RefineNet(1)
     model = Transporter(e, k, r)
-    model.load_state_dict(torch.load(model_path, map_location=device, weights_only=True), strict=True)
-    model.eval()
+    if dont_load:
+        model.load_state_dict(torch.load(model_path, map_location=device, weights_only=True), strict=True)
+        model.eval()
     model.to(device)
     model = torch.jit.script(model)
 
@@ -186,7 +189,7 @@ def get_object_keypoints_encoder(game, device, load_only_model=False, expert=Fal
                  adapter.encoder if adapter else None)
 
 
-def get_object_keypoints_keynet(game, device, load_only_model=False, expert=False):
+def get_object_keypoints_keynet(game, device, load_only_model=False, expert=False, dont_load=False):
     input_transformation_function = obj_key_input_trans
     if expert:
         model_path = "skills/models/" + game.lower() + "-obj-key-expert.pt"
@@ -197,8 +200,9 @@ def get_object_keypoints_keynet(game, device, load_only_model=False, expert=Fals
     k = KeyNet(1, 4)
     r = RefineNet(1)
     model = Transporter(e, k, r)
-    model.load_state_dict(torch.load(model_path, map_location=device, weights_only=True), strict=True)
-    model.eval()
+    if dont_load:
+        model.load_state_dict(torch.load(model_path, map_location=device, weights_only=True), strict=True)
+        model.eval()
     model.to(device)
     model = torch.jit.script(model)
 
@@ -231,15 +235,16 @@ def vid_obj_seg_input_trans(x: Tensor):
     return norm_s
 
 
-def get_video_object_segmentation(game, device, load_only_model=False, expert=False):
+def get_video_object_segmentation(game, device, load_only_model=False, expert=False, dont_load=False):
     if expert:
         model_path = "skills/models/" + game.lower() + "-vid-obj-seg-expert.pt"
     else:
         model_path = "skills/models/" + game.lower() + "-vid-obj-seg.pt"
 
     model = VideoObjectSegmentationModel(device)
-    model.load_state_dict(torch.load(model_path, map_location=device, weights_only=True), strict=True)
-    model.eval()
+    if dont_load:
+        model.load_state_dict(torch.load(model_path, map_location=device, weights_only=True), strict=True)
+        model.eval()
     model.to(device)
 
     if not load_only_model:
@@ -258,6 +263,16 @@ def get_video_object_segmentation(game, device, load_only_model=False, expert=Fa
 
     return Skill("vid_obj_seg", vid_obj_seg_input_trans, model, vos_output_masks, adapter.encoder if adapter else None)
 
+import torchvision
+
+def swin_inp_adpt(x: Tensor):
+    return x.repeat(1,3,1,1)
+
+def get_swin(device="cuda:0"):
+    model = torchvision.models.swin_t(weights=torchvision.models.Swin_T_Weights.DEFAULT).to(device)
+    # model.head = torch.nn.Identity()
+    model.eval()
+    return Skill("swin", swin_inp_adpt, model, model_forward, None)
 
 if __name__ == "__main__":
     a = get_state_rep_uns("pong", "cuda:0")
