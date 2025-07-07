@@ -374,12 +374,12 @@ class WSA(nn.Module):
         with torch.no_grad():
             out = m.input_adapter(x)
             out = m.skill_output(m.skill_model, out)
-        if m.name in self.c_adapters:
-            out = self.c_adapters[m.name](out)
         # end_event.record()
         # torch.cuda.synchronize()
         # elapsed_time = start_event.elapsed_time(end_event)  # in milliseconds
         # print(f"[Timer] {m.name} took {elapsed_time:.3f} ms")
+        if m.name in self.c_adapters:
+            out = self.c_adapters[m.name](out)
 
         return out if "state" in m.name else out.view(out.size(0), -1)
 
