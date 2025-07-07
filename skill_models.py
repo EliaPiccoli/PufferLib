@@ -17,6 +17,8 @@ from video_object_seg.model import VideoObjectSegmentationModel
 from autoencoders.model import Autoencoder
 # from skills.frame_prediction.model import FramePredictionModel
 
+import torchvision
+
 # TODO: Eventually can become: Skill(input_model, input_output, skill_model, skill_output, adapter_model, adapter_output)
 Skill = namedtuple('Skill', ['name', 'input_adapter', 'skill_model', 'skill_output', 'skill_adapter'])
 
@@ -274,27 +276,69 @@ def get_swin(device="cuda:0"):
     model.eval()
     return Skill("swin", swin_inp_adpt, model, model_forward, None)
 
+def get_swin(device="cuda:0"):
+    model = torchvision.models.swin_t(weights=torchvision.models.Swin_T_Weights.DEFAULT).to(device)
+    # model.head = torch.nn.Identity()
+    model.eval()
+    return Skill("swin", None, model, model_forward, None)
+
+def get_resnet(device="cuda:0"):
+    model = torchvision.models.resnet18(weights=torchvision.models.ResNet18_Weights.DEFAULT).to(device)
+    # model.head = torch.nn.Identity()
+    model.fc = torch.nn.Identity()
+    model.avgpool = torch.nn.Identity()
+    model.eval()
+    return Skill("resnet", None, model, model_forward, None)
+
+# def get_mvp_vit(device="cuda:0"):
+#     import mvp
+#     model = mvp.load("vitb-mae-egosoup")
+#     model.freeze()
+#     return Skill("mvp_vit", None, model, model_forward, None)
+
+def get_clip_model(device="cuda:0"):
+    import clip
+    model, process = clip.load('ViT-B/16', device)
+
+    # model.head = torch.nn.Identity()
+    model.eval()
+    return Skill("clip", None, model.encode_image, model_forward, None)
+
 if __name__ == "__main__":
-    a = get_state_rep_uns("pong", "cuda:0")
-    b = get_state_rep_uns("breakout", "cuda:0")
-    print("state_rep_uns:\t OK")
+    # import clip
+    # print(clip.available_models())
 
-    # c = get_state_ae("pong", "cuda:0")
-    # d = get_state_ae("breakout", "cuda:0")
-    # print("state_ae:\t OK")
-    #
-    # e = get_denoise_ae("pong", "cuda:0")
-    # f = get_denoise_ae("breakout", "cuda:0")
-    # print("denoise_ae:\t OK")
+    # a = get_state_rep_uns("pong", "cuda:0")
+    # b = get_state_rep_uns("breakout", "cuda:0")
+    # print("state_rep_uns:\t OK")
 
-    g = get_object_keypoints_encoder("pong", "cuda:0")
-    h = get_object_keypoints_encoder("breakout", "cuda:0")
-    print("object_keypoints_encoder:\t OK")
+    # # c = get_state_ae("pong", "cuda:0")
+    # # d = get_state_ae("breakout", "cuda:0")
+    # # print("state_ae:\t OK")
+    # #
+    # # e = get_denoise_ae("pong", "cuda:0")
+    # # f = get_denoise_ae("breakout", "cuda:0")
+    # # print("denoise_ae:\t OK")
 
-    i = get_object_keypoints_keynet("pong", "cuda:0")
-    j = get_object_keypoints_keynet("breakout", "cuda:0")
-    print("object_keypoints_keynet:\t OK")
+    # g = get_object_keypoints_encoder("pong", "cuda:0")
+    # h = get_object_keypoints_encoder("breakout", "cuda:0")
+    # print("object_keypoints_encoder:\t OK")
 
-    k = get_video_object_segmentation("pong", "cuda:0")
-    l = get_video_object_segmentation("breakout", "cuda:0")
-    print("video_object_segmentation:\t OK")
+    # i = get_object_keypoints_keynet("pong", "cuda:0")
+    # j = get_object_keypoints_keynet("breakout", "cuda:0")
+    # print("object_keypoints_keynet:\t OK")
+
+    # k = get_video_object_segmentation("pong", "cuda:0")
+    # l = get_video_object_segmentation("breakout", "cuda:0")
+    # print("video_object_segmentation:\t OK")
+
+    swin = get_swin()
+    print("swin:\t OK")
+    print(swin)
+    # resnet = get_resnet()
+    # print("resnet:\t OK")
+    # print(resnet)
+    # mvp = get_mvp_vit()
+    # print("mvp_vit:\t OK")
+    # clip = get_clip_model()
+    # print("clip:\t OK")
